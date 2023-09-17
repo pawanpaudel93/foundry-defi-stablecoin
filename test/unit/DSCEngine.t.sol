@@ -7,6 +7,7 @@ import {HelperConfig} from "../../script/HelperConfig.s.sol";
 import {DecentralizedStableCoin} from "../../src/DecentralizedStableCoin.sol";
 import {DSCEngine} from "../../src/DSCEngine.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/ERC20Mock.sol";
+import {MockV3Aggregator} from "../mocks/MockV3Aggregator.sol";
 
 contract DSCEngineTest is Test {
     DeployDSC deployer;
@@ -16,6 +17,9 @@ contract DSCEngineTest is Test {
     address ethUsdPriceFeed;
     address btcUsdPriceFeed;
     address weth;
+
+    uint256 amountCollateral = 10 ether;
+    uint256 amountToMint = 100 ether;
 
     address public USER = makeAddr("user");
     uint256 public constant AMOUNT_COLLATERAL = 10 ether;
@@ -156,4 +160,80 @@ contract DSCEngineTest is Test {
         assertEq(totalDscMinted, expectedTotalDscMinted);
         assertEq(AMOUNT_COLLATERAL, expectedDepositAmount);
     }
+
+    function testRevertsIfMintedDscBreaksHealthFactor() public {
+        (, int256 price,,,) = MockV3Aggregator(ethUsdPriceFeed).latestRoundData();
+        amountToMint = (amountCollateral * (uint256(price) * dsce.getAdditionalFeedPrecision())) / dsce.getPrecision();
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(dsce), amountCollateral);
+
+        uint256 expectedHealthFactor =
+            dsce.calculateHealthFactor(amountToMint, dsce.getUsdValue(weth, amountCollateral));
+        vm.expectRevert(abi.encodeWithSelector(DSCEngine.DSCEngine__BreaksHealthFacor.selector, expectedHealthFactor));
+        dsce.depositCollateralAndMintDsc(weth, amountCollateral, amountToMint);
+        vm.stopPrank();
+    }
+
+    //////////////////////////////
+    // Burn & Redeem Collateral //
+    //////////////////////////////
+
+    modifier redeemCollateral(uint256 amount) {
+        vm.startPrank(USER);
+        dsce.redeemCollateral(weth, amount);
+        vm.stopPrank();
+        _;
+    }
+
+    modifier burnDsc(uint256 amount) {
+        vm.startPrank(USER);
+        ERC20Mock(address(dsc)).approve(address(dsce), amount);
+        dsce.burnDsc(amount);
+        vm.stopPrank();
+        _;
+    }
+
+    function testBurnCollateralAndGetAccountInfo() public depositedCollateral mintDsc burnDsc(AMOUNT_DSC_MINT) {
+        (uint256 totalDscMinted, uint256 collateralValueInUsd) = dsce.getAccountInformation(USER);
+
+        uint256 expectedTotalDscMinted = 0;
+        uint256 expectedDepositAmount = dsce.getTokenAmountFromUsd(weth, collateralValueInUsd);
+        assertEq(totalDscMinted, expectedTotalDscMinted);
+        assertEq(AMOUNT_COLLATERAL, expectedDepositAmount);
+    }
+
+    function testRedeemCollateralAndGetAccountInfo()
+        public
+        depositedCollateral
+        mintDsc
+        burnDsc(AMOUNT_DSC_MINT)
+        redeemCollateral(AMOUNT_COLLATERAL)
+    {
+        (uint256 totalDscMinted, uint256 collateralValueInUsd) = dsce.getAccountInformation(USER);
+
+        uint256 expectedTotalDscMinted = 0;
+        uint256 expectedDepositAmount = dsce.getTokenAmountFromUsd(weth, collateralValueInUsd);
+        assertEq(totalDscMinted, expectedTotalDscMinted);
+        assertEq(0, expectedDepositAmount);
+    }
+
+    function testRedeemCollateralForDscAndGetAccountInfo() public depositedCollateral mintDsc {
+        vm.startPrank(USER);
+        uint256 burnAmount = AMOUNT_DSC_MINT;
+        uint256 collateralAmount = AMOUNT_COLLATERAL;
+        ERC20Mock(address(dsc)).approve(address(dsce), burnAmount);
+        dsce.redeemCollateralForDsc(weth, collateralAmount, burnAmount);
+        vm.stopPrank();
+
+        (uint256 totalDscMinted, uint256 collateralValueInUsd) = dsce.getAccountInformation(USER);
+
+        uint256 expectedTotalDscMinted = 0;
+        uint256 expectedDepositAmount = dsce.getTokenAmountFromUsd(weth, collateralValueInUsd);
+        assertEq(totalDscMinted, expectedTotalDscMinted);
+        assertEq(0, expectedDepositAmount);
+    }
+
+    ///////////////////////
+    // Liquidation Tests //
+    ///////////////////////
 }

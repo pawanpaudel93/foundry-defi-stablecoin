@@ -282,8 +282,7 @@ contract DSCEngine is ReentrancyGuard {
      */
     function _healthFactor(address user) internal view returns (uint256) {
         (uint256 totalDscMinted, uint256 colleteralValueInUsd) = _getAccountInformation(user);
-        uint256 colleteralAdjustedForThreshold = (colleteralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
-        return (colleteralAdjustedForThreshold * PRECISION) / totalDscMinted;
+        return _calculateHealthFactor(totalDscMinted, colleteralValueInUsd);
     }
 
     function _revertIfHealthFactorBroken(address user) internal view {
@@ -293,9 +292,26 @@ contract DSCEngine is ReentrancyGuard {
         }
     }
 
+    function _calculateHealthFactor(uint256 totalDscMinted, uint256 collateralValueInUsd)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (totalDscMinted == 0) return type(uint256).max;
+        uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
+        return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
+    }
+
     /////////////////////////////////////////
-    // Public & External View Functions  //
+    // Public & External View & Pure Functions  //
     ///////////////////////////////////////
+    function calculateHealthFactor(uint256 totalDscMinted, uint256 collateralValueInUsd)
+        external
+        pure
+        returns (uint256)
+    {
+        return _calculateHealthFactor(totalDscMinted, collateralValueInUsd);
+    }
 
     /**
      *
@@ -354,5 +370,13 @@ contract DSCEngine is ReentrancyGuard {
         returns (uint256 totalDscMinted, uint256 colleteralValueInUsd)
     {
         (totalDscMinted, colleteralValueInUsd) = _getAccountInformation(user);
+    }
+
+    function getAdditionalFeedPrecision() external pure returns (uint256) {
+        return ADDITIONAL_FEED_PRECISION;
+    }
+
+    function getPrecision() external pure returns (uint256) {
+        return PRECISION;
     }
 }
